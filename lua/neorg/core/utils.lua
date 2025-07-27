@@ -4,6 +4,130 @@ local log = require("neorg.core.log")
 local utils = {}
 local version = vim.version() -- TODO: Move to a more local scope
 
+utils.ts_utils = {
+
+    -- all functions here are taken from nvim-treesitter and modifed to work with the new api
+    -- https://github.com/nvim-treesitter/
+    get_root_for_position = function(line, col, root_lang_tree)
+        if not root_lang_tree then
+            -- at this point we would have crashed if we don't have neorg-treesitter installed.
+            -- we can just add a check if this is not the case, but we don't need the more general check that treesitter used
+            root_lang_tree = vim.treesitter.get_parser()
+        end
+        local lang_tree = root_lang_tree:language_for_range({ line, col, line, col })
+        while true do
+            for _, tree in pairs(lang_tree:trees()) do
+                local root = tree:root()
+                if root and vim.treesitter.is_in_node_range(root, line, col) then
+                    return root, tree, lang_tree
+                end
+            end
+            if lang_tree == root_lang_tree then
+                break
+            end
+            lang_tree = lang_tree:parent()
+        end
+        return nil, nil, lang_tree
+    end,
+    get_node_at_cursor = function(winnr, ignore_injected_langs)
+        winnr = winnr or 0
+        local cursor = vim.api.nvim_win_get_cursor(winnr)
+        local cursor_range = { cursor[1] - 1, cursor[2] }
+        local buf = vim.api.nvim_win_get_buf(winnr)
+        local root_lang_tree = vim.treesitter.get_parser(buf)
+        if not root_lang_tree then
+            return
+        end
+        local root
+        if ignore_injected_langs then
+            for _, tree in pairs(root_lang_tree:trees()) do
+                local tree_root = tree:root()
+                if tree_root and vim.treesitter.is_in_node_range(tree_root, cursor_range[1], cursor_range[2]) then
+                    root = tree_root
+                    break
+                end
+            end
+        else
+            root = utils.ts_utils.get_root_for_position(cursor_range[1], cursor_range[2], root_lang_tree)
+        end
+        if not root then
+            return
+        end
+        return root:named_descendant_for_range(cursor_range[1], cursor_range[2], cursor_range[1], cursor_range[2])
+    end,
+    goto_node = function(node, goto_end, avoid_set_jump)
+        if not node then
+            return
+        end
+        if not avoid_set_jump then
+            vim.cmd("normal! m'")
+        end
+        local range = { vim.treesitter.get_range(node:range()) }
+        local position
+        if not goto_end then
+            position = { range[1], range[2] }
+        else
+            position = { range[3], range[4] }
+            local mode = vim.api.nvim_get_mode()
+            if mode.mode == "no" then
+                vim.cmd("normal! v")
+            end
+            vim.api.nvim_win_set_cursor(0, { position[1], position[2] - 1 })
+        end
+    end,
+    get_previous_node = function(node, allow_switch_parents, allow_previous_parent)
+        local destination_node ---@type TSNode
+        local parent = node:parent()
+        if not parent then
+            return
+        end
+
+        local found_pos = 0
+        for i = 0, parent:named_child_count() - 1, 1 do
+            if parent:named_child(i) == node then
+                found_pos = i
+                break
+            end
+        end
+        if 0 < found_pos then
+            destination_node = parent:named_child(found_pos - 1)
+        elseif allow_switch_parents then
+            local previous_node = utils.ts_utils.get_previous_node(node:parent())
+            if previous_node and previous_node:named_child_count() > 0 then
+                destination_node = previous_node:named_child(previous_node:named_child_count() - 1)
+            elseif previous_node and allow_previous_parent then
+                destination_node = previous_node
+            end
+        end
+        return destination_node
+    end,
+    get_next_node = function(node, allow_switch_parents, allow_next_parent)
+        local destination_node
+        local parent = node:parent()
+        if not parent then
+            return
+        end
+        local found_pos = 0
+        for i = 0, parent:named_child_count() - 1, 1 do
+            if parent:named_child(i) == node then
+                found_pos = i
+                break
+            end
+        end
+        if parent:named_child_count() > found_pos + 1 then
+            destination_node = parent:named_child(found_pos + 1)
+        elseif allow_switch_parents then
+            local next_node = utils.ts_utils.get_next_node(node:parent())
+            if next_node and next_node:named_child_count() > 0 then
+                destination_node = next_node:named_child(0)
+            elseif next_node and allow_next_parent then
+                destination_node = next_node
+            end
+        end
+        return destination_node
+    end,
+}
+
 --- A version agnostic way to call the neovim treesitter query parser
 --- @param language string # Language to use for the query
 --- @param query_string string # Query in s-expr syntax

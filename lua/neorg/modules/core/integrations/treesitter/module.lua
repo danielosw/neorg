@@ -18,6 +18,7 @@ mapping them):
 --]]
 
 local neorg = require("neorg.core")
+local treesitter = require("nvim-treesitter")
 local lib, log, modules, utils = neorg.lib, neorg.log, neorg.modules, neorg.utils
 
 local module = modules.create("core.integrations.treesitter")
@@ -58,22 +59,18 @@ module.setup = function()
 end
 
 module.load = function()
-    local success, ts_utils = pcall(require, "nvim-treesitter.ts_utils")
-
-    assert(success, "Unable to load nvim-treesitter.ts_utils :(")
 
     if module.config.public.configure_parsers then
         -- luacheck: push ignore
 
-        local parser_configs = require("nvim-treesitter.parsers").get_parser_configs()
 
-        parser_configs.norg = {
-            install_info = module.config.public.parser_configs.norg,
-        }
+        treesitter.install(
+            module.config.public.parser_configs.norg
+		)
 
-        parser_configs.norg_meta = {
-            install_info = module.config.public.parser_configs.norg_meta,
-        }
+        treesitter.install(
+        module.config.public.parser_configs.norg_meta
+		)
 
         modules.await("core.neorgcmd", function(neorgcmd)
             neorgcmd.add_commands_from_table({
@@ -97,8 +94,10 @@ module.load = function()
                 end
 
                 if module.config.public.install_parsers then
-                    require("nvim-treesitter.install").commands.TSInstallSync["run!"]("norg", "norg_meta")
-                    module.public.parser_path = vim.api.nvim_get_runtime_file("parser/norg.so", false)[1]
+                    -- error out for now
+					assert(false, "Install neorg-treesitter manually please")
+					module.public.parser_path = vim.api.nvim_get_runtime_file("parser/norg.so", false)[1]
+
                 else
                     assert(
                         false,
@@ -109,7 +108,7 @@ module.load = function()
         })
     end
 
-    module.private.ts_utils = ts_utils
+    module.private.ts_utils = utils.ts
 
     vim.keymap.set(
         "",
@@ -189,7 +188,7 @@ module.public = {
 
                 -- Skip node if it's inside a closed fold
                 if not vim.tbl_contains({ -1, start_line }, vim.fn.foldclosed(start_line)) then
-                    goto continue
+					goto continue
                 end
 
                 -- Find and go to the first matching node that starts after the current cursor position.
